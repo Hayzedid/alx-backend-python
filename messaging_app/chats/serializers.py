@@ -1,9 +1,14 @@
 from rest_framework import serializers
+from rest_framework.serializers import CharField, ValidationError
 from .models import User, Conversation, Message
 
 
 class UserSerializer(serializers.ModelSerializer):
     """Serializer for User model"""
+    first_name = CharField(max_length=150, required=True)
+    last_name = CharField(max_length=150, required=True)
+    email = CharField(max_length=254, required=True)
+    
     class Meta:
         model = User
         fields = [
@@ -11,20 +16,34 @@ class UserSerializer(serializers.ModelSerializer):
             'phone_number', 'role', 'created_at'
         ]
         read_only_fields = ['user_id', 'created_at']
+    
+    def validate_email(self, value):
+        """Validate email uniqueness"""
+        if User.objects.filter(email=value).exists():
+            raise ValidationError("A user with this email already exists.")
+        return value
 
 
 class MessageSerializer(serializers.ModelSerializer):
-    """Serializer for Message model"""
+    """Serializer for Message model with nested relationships"""
     sender = UserSerializer(read_only=True)
     sender_id = serializers.UUIDField(write_only=True)
+    message_body = CharField(max_length=5000, required=True)
+    conversation_id = serializers.UUIDField(write_only=True, required=False)
 
     class Meta:
         model = Message
         fields = [
             'message_id', 'sender', 'sender_id', 'conversation', 
-            'message_body', 'sent_at'
+            'conversation_id', 'message_body', 'sent_at'
         ]
         read_only_fields = ['message_id', 'sent_at']
+
+    def validate_message_body(self, value):
+        """Validate message body"""
+        if not value or len(value.strip()) == 0:
+            raise ValidationError("Message body cannot be empty.")
+        return value
 
     def create(self, validated_data):
         sender_id = validated_data.pop('sender_id')
@@ -34,7 +53,7 @@ class MessageSerializer(serializers.ModelSerializer):
 
 
 class ConversationSerializer(serializers.ModelSerializer):
-    """Serializer for Conversation model"""
+    """Serializer for Conversation model with nested relationships"""
     participants = UserSerializer(many=True, read_only=True)
     participant_ids = serializers.ListField(
         child=serializers.UUIDField(),
@@ -43,12 +62,13 @@ class ConversationSerializer(serializers.ModelSerializer):
     )
     messages = MessageSerializer(many=True, read_only=True)
     message_count = serializers.SerializerMethodField()
+    last_message = serializers.SerializerMethodField()
 
     class Meta:
         model = Conversation
         fields = [
             'conversation_id', 'participants', 'participant_ids',
-            'messages', 'message_count', 'created_at'
+            'messages', 'message_count', 'last_message', 'created_at'
         ]
         read_only_fields = ['conversation_id', 'created_at']
 
@@ -56,12 +76,27 @@ class ConversationSerializer(serializers.ModelSerializer):
         """Get the count of messages in the conversation"""
         return obj.messages.count()
 
+    def get_last_message(self, obj):
+        """Get the last message in the conversation"""
+        last_message = obj.messages.last()
+        if last_message:
+            return MessageSerializer(last_message).data
+        return None
+
+    def validate_participant_ids(self, value):
+        """Validate participant IDs"""
+        if value and len(value) < 2:
+            raise ValidationError("A conversation must have at least 2 participants.")
+        return value
+
     def create(self, validated_data):
         participant_ids = validated_data.pop('participant_ids', [])
         conversation = Conversation.objects.create()
         
         if participant_ids:
             participants = User.objects.filter(user_id__in=participant_ids)
+            if participants.count() != len(participant_ids):
+                raise ValidationError("Some participant IDs are invalid.")
             conversation.participants.set(participants)
         
         return conversation
@@ -98,12 +133,25 @@ class ConversationListSerializer(serializers.ModelSerializer):
 
 
 class MessageCreateSerializer(serializers.ModelSerializer):
-    """Serializer for creating new messages"""
-    sender_id = serializers.UUIDField()
+    """Serializer for creating new messages with validation"""
+    sender_id = serializers.UUIDField(required=True)
+    message_body = CharField(max_length=5000, required=True)
 
     class Meta:
         model = Message
         fields = ['sender_id', 'conversation', 'message_body']
+
+    def validate_message_body(self, value):
+        """Validate message body"""
+        if not value or len(value.strip()) == 0:
+            raise ValidationError("Message body cannot be empty.")
+        return value
+
+    def validate_sender_id(self, value):
+        """Validate sender exists"""
+        if not User.objects.filter(user_id=value).exists():
+            raise ValidationError("Invalid sender ID.")
+        return value
 
     def create(self, validated_data):
         sender_id = validated_data.pop('sender_id')

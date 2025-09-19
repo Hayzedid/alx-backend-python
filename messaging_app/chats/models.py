@@ -9,6 +9,8 @@ class User(AbstractUser):
     first_name = models.CharField(max_length=150, null=False)
     last_name = models.CharField(max_length=150, null=False)
     email = models.EmailField(unique=True, null=False, db_index=True)
+    # password field is inherited from AbstractUser - provides password authentication
+    password_hash = models.CharField(max_length=128, null=False)  # Additional password hash field
     phone_number = models.CharField(max_length=20, null=True, blank=True)
     role = models.CharField(
         max_length=10,

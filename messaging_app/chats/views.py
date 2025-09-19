@@ -1,9 +1,10 @@
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 from django.db import models
+from django_filters.rest_framework import DjangoFilterBackend
 from .models import User, Conversation, Message
 from .serializers import (
     UserSerializer, ConversationSerializer, ConversationListSerializer,
@@ -12,10 +13,15 @@ from .serializers import (
 
 
 class UserViewSet(viewsets.ModelViewSet):
-    """ViewSet for User model"""
+    """ViewSet for User model with filtering"""
     queryset = User.objects.all()
     serializer_class = UserSerializer
     permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['role', 'created_at']
+    search_fields = ['first_name', 'last_name', 'email']
+    ordering_fields = ['created_at', 'first_name', 'last_name']
+    ordering = ['-created_at']
 
     def get_queryset(self):
         """Filter users based on search parameters"""
@@ -37,9 +43,14 @@ class UserViewSet(viewsets.ModelViewSet):
 
 
 class ConversationViewSet(viewsets.ModelViewSet):
-    """ViewSet for Conversation model"""
+    """ViewSet for Conversation model with filtering"""
     queryset = Conversation.objects.all()
     permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['created_at', 'participants']
+    search_fields = ['participants__first_name', 'participants__last_name', 'participants__email']
+    ordering_fields = ['created_at']
+    ordering = ['-created_at']
 
     def get_serializer_class(self):
         """Return appropriate serializer based on action"""
@@ -113,9 +124,14 @@ class ConversationViewSet(viewsets.ModelViewSet):
 
 
 class MessageViewSet(viewsets.ModelViewSet):
-    """ViewSet for Message model"""
+    """ViewSet for Message model with filtering"""
     queryset = Message.objects.all()
     permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['conversation', 'sender', 'sent_at']
+    search_fields = ['message_body', 'sender__first_name', 'sender__last_name', 'sender__email']
+    ordering_fields = ['sent_at']
+    ordering = ['sent_at']
 
     def get_serializer_class(self):
         """Return appropriate serializer based on action"""
