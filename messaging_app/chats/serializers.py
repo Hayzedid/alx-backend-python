@@ -1,13 +1,12 @@
 from rest_framework import serializers
-from rest_framework.serializers import CharField, ValidationError
 from .models import User, Conversation, Message
 
 
 class UserSerializer(serializers.ModelSerializer):
     """Serializer for User model"""
-    first_name = CharField(max_length=150, required=True)
-    last_name = CharField(max_length=150, required=True)
-    email = CharField(max_length=254, required=True)
+    first_name = serializers.CharField(max_length=150, required=True)
+    last_name = serializers.CharField(max_length=150, required=True)
+    email = serializers.CharField(max_length=254, required=True)
     
     class Meta:
         model = User
@@ -20,7 +19,7 @@ class UserSerializer(serializers.ModelSerializer):
     def validate_email(self, value):
         """Validate email uniqueness"""
         if User.objects.filter(email=value).exists():
-            raise ValidationError("A user with this email already exists.")
+            raise serializers.ValidationError("A user with this email already exists.")
         return value
 
 
@@ -28,7 +27,7 @@ class MessageSerializer(serializers.ModelSerializer):
     """Serializer for Message model with nested relationships"""
     sender = UserSerializer(read_only=True)
     sender_id = serializers.UUIDField(write_only=True)
-    message_body = CharField(max_length=5000, required=True)
+    message_body = serializers.CharField(max_length=5000, required=True)
     conversation_id = serializers.UUIDField(write_only=True, required=False)
 
     class Meta:
@@ -42,7 +41,7 @@ class MessageSerializer(serializers.ModelSerializer):
     def validate_message_body(self, value):
         """Validate message body"""
         if not value or len(value.strip()) == 0:
-            raise ValidationError("Message body cannot be empty.")
+            raise serializers.ValidationError("Message body cannot be empty.")
         return value
 
     def create(self, validated_data):
@@ -86,7 +85,7 @@ class ConversationSerializer(serializers.ModelSerializer):
     def validate_participant_ids(self, value):
         """Validate participant IDs"""
         if value and len(value) < 2:
-            raise ValidationError("A conversation must have at least 2 participants.")
+            raise serializers.ValidationError("A conversation must have at least 2 participants.")
         return value
 
     def create(self, validated_data):
@@ -96,7 +95,7 @@ class ConversationSerializer(serializers.ModelSerializer):
         if participant_ids:
             participants = User.objects.filter(user_id__in=participant_ids)
             if participants.count() != len(participant_ids):
-                raise ValidationError("Some participant IDs are invalid.")
+                raise serializers.ValidationError("Some participant IDs are invalid.")
             conversation.participants.set(participants)
         
         return conversation
@@ -135,7 +134,7 @@ class ConversationListSerializer(serializers.ModelSerializer):
 class MessageCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating new messages with validation"""
     sender_id = serializers.UUIDField(required=True)
-    message_body = CharField(max_length=5000, required=True)
+    message_body = serializers.CharField(max_length=5000, required=True)
 
     class Meta:
         model = Message
@@ -144,13 +143,13 @@ class MessageCreateSerializer(serializers.ModelSerializer):
     def validate_message_body(self, value):
         """Validate message body"""
         if not value or len(value.strip()) == 0:
-            raise ValidationError("Message body cannot be empty.")
+            raise serializers.ValidationError("Message body cannot be empty.")
         return value
 
     def validate_sender_id(self, value):
         """Validate sender exists"""
         if not User.objects.filter(user_id=value).exists():
-            raise ValidationError("Invalid sender ID.")
+            raise serializers.ValidationError("Invalid sender ID.")
         return value
 
     def create(self, validated_data):
