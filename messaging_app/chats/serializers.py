@@ -62,12 +62,15 @@ class ConversationSerializer(serializers.ModelSerializer):
     messages = MessageSerializer(many=True, read_only=True)
     message_count = serializers.SerializerMethodField()
     last_message = serializers.SerializerMethodField()
+    
+    # Ensure nested relationships are properly handled
+    nested_messages = serializers.SerializerMethodField()
 
     class Meta:
         model = Conversation
         fields = [
             'conversation_id', 'participants', 'participant_ids',
-            'messages', 'message_count', 'last_message', 'created_at'
+            'messages', 'nested_messages', 'message_count', 'last_message', 'created_at'
         ]
         read_only_fields = ['conversation_id', 'created_at']
 
@@ -81,6 +84,11 @@ class ConversationSerializer(serializers.ModelSerializer):
         if last_message:
             return MessageSerializer(last_message).data
         return None
+    
+    def get_nested_messages(self, obj):
+        """Get nested messages for the conversation"""
+        messages = obj.messages.all()
+        return MessageSerializer(messages, many=True).data
 
     def validate_participant_ids(self, value):
         """Validate participant IDs"""
