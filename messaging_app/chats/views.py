@@ -10,6 +10,9 @@ from .serializers import (
     UserSerializer, ConversationSerializer, ConversationListSerializer,
     MessageSerializer, MessageCreateSerializer
 )
+from .permissions import IsParticipantOfConversation, IsMessageSenderOrParticipant, IsConversationParticipant
+from .pagination import MessagePagination, ConversationPagination, UserPagination
+from .filters import MessageFilter, ConversationFilter, UserFilter
 
 
 class UserViewSet(viewsets.ModelViewSet):
@@ -17,8 +20,9 @@ class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = UserPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['role', 'created_at']
+    filterset_class = UserFilter
     search_fields = ['first_name', 'last_name', 'email']
     ordering_fields = ['created_at', 'first_name', 'last_name']
     ordering = ['-created_at']
@@ -45,9 +49,10 @@ class UserViewSet(viewsets.ModelViewSet):
 class ConversationViewSet(viewsets.ModelViewSet):
     """ViewSet for Conversation model with filtering"""
     queryset = Conversation.objects.all()
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsParticipantOfConversation]
+    pagination_class = ConversationPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['created_at', 'participants']
+    filterset_class = ConversationFilter
     search_fields = ['participants__first_name', 'participants__last_name', 'participants__email']
     ordering_fields = ['created_at']
     ordering = ['-created_at']
@@ -126,9 +131,10 @@ class ConversationViewSet(viewsets.ModelViewSet):
 class MessageViewSet(viewsets.ModelViewSet):
     """ViewSet for Message model with filtering"""
     queryset = Message.objects.all()
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsMessageSenderOrParticipant]
+    pagination_class = MessagePagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['conversation', 'sender', 'sent_at']
+    filterset_class = MessageFilter
     search_fields = ['message_body', 'sender__first_name', 'sender__last_name', 'sender__email']
     ordering_fields = ['sent_at']
     ordering = ['sent_at']

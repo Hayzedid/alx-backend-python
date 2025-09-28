@@ -29,3 +29,4 @@ class MessageAdmin(admin.ModelAdmin):
     search_fields = ('sender__email', 'message_body')
     ordering = ('-sent_at',)
 
+
