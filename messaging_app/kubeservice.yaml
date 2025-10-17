@@ -1,0 +1,86 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: django-messaging-service-blue-green
+  labels:
+    app: django-messaging-app
+    service-type: blue-green
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  selector:
+    app: django-messaging-app
+    version: blue  # Initially points to blue deployment
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: django-messaging-service-blue
+  labels:
+    app: django-messaging-app
+    service-type: blue
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  selector:
+    app: django-messaging-app
+    version: blue
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: django-messaging-service-green
+  labels:
+    app: django-messaging-app
+    service-type: green
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  selector:
+    app: django-messaging-app
+    version: green
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: django-messaging-service-canary
+  labels:
+    app: django-messaging-app
+    service-type: canary
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  selector:
+    app: django-messaging-app
+    # No version selector - will load balance across all versions
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: blue-green-config
+  labels:
+    app: django-messaging-app
+data:
+  current-version: "blue"
+  target-version: "green"
+  switch-strategy: "instant"  # Options: instant, gradual, canary

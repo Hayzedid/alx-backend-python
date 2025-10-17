@@ -1,0 +1,68 @@
+# Kubernetes Ingress Setup Commands
+# ==================================
+
+# 1. Enable Nginx Ingress Controller in Minikube
+minikube addons enable ingress
+
+# 2. Verify Ingress Controller is running
+kubectl get pods -n ingress-nginx
+
+# 3. Apply the Ingress configuration
+kubectl apply -f ingress.yaml
+
+# 4. Verify Ingress resource is created
+kubectl get ingress
+
+# 5. Describe Ingress for detailed information
+kubectl describe ingress django-messaging-ingress
+
+# 6. Get Minikube IP for local testing
+minikube ip
+
+# 7. Add entries to /etc/hosts (Linux/Mac) or C:\Windows\System32\drivers\etc\hosts (Windows)
+# Replace <MINIKUBE_IP> with actual IP from step 6
+# <MINIKUBE_IP> messaging-app.local
+# <MINIKUBE_IP> api.messaging-app.local
+
+# 8. Test Ingress access
+curl -H "Host: messaging-app.local" http://$(minikube ip)/
+
+# 9. Test API endpoint through Ingress
+curl -H "Host: messaging-app.local" http://$(minikube ip)/api/
+
+# 10. Access via browser (after adding hosts entries)
+# http://messaging-app.local/
+# http://api.messaging-app.local/
+
+# 11. Monitor Ingress Controller logs
+kubectl logs -n ingress-nginx -l app.kubernetes.io/name=ingress-nginx
+
+# 12. Get Ingress Controller service details
+kubectl get svc -n ingress-nginx
+
+# 13. Port forward for local testing (alternative method)
+kubectl port-forward -n ingress-nginx service/ingress-nginx-controller 8080:80
+
+# 14. Test with port forwarding
+curl -H "Host: messaging-app.local" http://localhost:8080/
+
+# 15. Clean up Ingress (if needed)
+kubectl delete -f ingress.yaml
+
+# Additional useful commands:
+# ==========================
+
+# Check all ingress resources
+kubectl get ingress --all-namespaces
+
+# Watch ingress status changes
+kubectl get ingress -w
+
+# Get ingress controller configuration
+kubectl get configmap -n ingress-nginx
+
+# Check ingress controller version
+kubectl get deployment -n ingress-nginx ingress-nginx-controller -o yaml | grep image:
+
+# Restart ingress controller (if needed)
+kubectl rollout restart deployment -n ingress-nginx ingress-nginx-controller

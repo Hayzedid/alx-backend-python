@@ -1,0 +1,231 @@
+#!/bin/bash
+
+# Blue-Green Deployment Script - kubctl-0x02
+# This script manages blue-green deployments for the Django messaging app
+
+echo "🔄 Blue-Green Deployment Management Script"
+echo "=========================================="
+
+# Function to check if kubectl is available
+check_kubectl() {
+    if ! command -v kubectl &> /dev/null; then
+        echo "❌ kubectl is not installed or not in PATH"
+        exit 1
+    fi
+}
+
+# Function to wait for deployment to be ready
+wait_for_deployment() {
+    local deployment_name=$1
+    local timeout=${2:-300}
+    
+    echo "⏳ Waiting for deployment $deployment_name to be ready..."
+    kubectl wait --for=condition=available deployment/$deployment_name --timeout=${timeout}s
+    
+    if [ $? -eq 0 ]; then
+        echo "✅ Deployment $deployment_name is ready"
+        return 0
+    else
+        echo "❌ Deployment $deployment_name failed to become ready within ${timeout}s"
+        return 1
+    fi
+}
+
+# Function to check pod logs for errors
+check_pod_logs() {
+    local version=$1
+    echo ""
+    echo "📝 Checking logs for $version deployment..."
+    echo "=========================================="
+    
+    local pods=$(kubectl get pods -l app=django-messaging-app,version=$version -o jsonpath='{.items[*].metadata.name}')
+    
+    if [ -z "$pods" ]; then
+        echo "⚠️  No pods found for $version deployment"
+        return 1
+    fi
+    
+    local error_found=false
+    
+    for pod in $pods; do
+        echo ""
+        echo "--- Checking pod: $pod ---"
+        
+        # Check pod status
+        local pod_status=$(kubectl get pod $pod -o jsonpath='{.status.phase}')
+        echo "Pod status: $pod_status"
+        
+        if [ "$pod_status" != "Running" ]; then
+            echo "❌ Pod $pod is not running (status: $pod_status)"
+            error_found=true
+        fi
+        
+        # Check recent logs for errors
+        echo "Recent logs:"
+        local logs=$(kubectl logs $pod --tail=20 2>&1)
+        
+        if echo "$logs" | grep -i -E "(error|exception|failed|traceback)" > /dev/null; then
+            echo "❌ Errors found in pod $pod logs:"
+            echo "$logs" | grep -i -E "(error|exception|failed|traceback)"
+            error_found=true
+        else
+            echo "✅ No errors found in recent logs"
+        fi
+        
+        # Check readiness and liveness probes
+        local ready=$(kubectl get pod $pod -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
+        if [ "$ready" != "True" ]; then
+            echo "❌ Pod $pod is not ready"
+            error_found=true
+        fi
+    done
+    
+    if [ "$error_found" = true ]; then
+        return 1
+    else
+        echo "✅ All $version pods are healthy"
+        return 0
+    fi
+}
+
+# Function to switch traffic between blue and green
+switch_traffic() {
+    local target_version=$1
+    echo ""
+    echo "🔄 Switching traffic to $target_version deployment..."
+    
+    # Update the main service selector
+    kubectl patch service django-messaging-service-blue-green -p '{"spec":{"selector":{"app":"django-messaging-app","version":"'$target_version'"}}}'
+    
+    if [ $? -eq 0 ]; then
+        echo "✅ Traffic switched to $target_version"
+        
+        # Update ConfigMap
+        kubectl patch configmap blue-green-config -p '{"data":{"current-version":"'$target_version'"}}'
+        
+        return 0
+    else
+        echo "❌ Failed to switch traffic to $target_version"
+        return 1
+    fi
+}
+
+# Main execution starts here
+echo "📋 Checking prerequisites..."
+check_kubectl
+
+# Deploy Blue version
+echo ""
+echo "🔵 Deploying Blue version..."
+echo "============================"
+kubectl apply -f blue_deployment.yaml
+
+if [ $? -eq 0 ]; then
+    echo "✅ Blue deployment applied successfully"
+else
+    echo "❌ Failed to apply blue deployment"
+    exit 1
+fi
+
+# Deploy services
+echo ""
+echo "🔗 Deploying services..."
+echo "========================"
+kubectl apply -f kubeservice.yaml
+
+if [ $? -eq 0 ]; then
+    echo "✅ Services applied successfully"
+else
+    echo "❌ Failed to apply services"
+    exit 1
+fi
+
+# Wait for blue deployment to be ready
+wait_for_deployment "django-messaging-app-blue"
+
+# Check blue deployment logs
+check_pod_logs "blue"
+blue_healthy=$?
+
+# Deploy Green version
+echo ""
+echo "🟢 Deploying Green version..."
+echo "============================="
+kubectl apply -f green_deployment.yaml
+
+if [ $? -eq 0 ]; then
+    echo "✅ Green deployment applied successfully"
+else
+    echo "❌ Failed to apply green deployment"
+    exit 1
+fi
+
+# Wait for green deployment to be ready
+wait_for_deployment "django-messaging-app-green"
+
+# Check green deployment logs
+check_pod_logs "green"
+green_healthy=$?
+
+# Display current status
+echo ""
+echo "📊 Current deployment status:"
+echo "============================="
+kubectl get deployments -l app=django-messaging-app
+kubectl get pods -l app=django-messaging-app -o wide
+kubectl get services -l app=django-messaging-app
+
+# Check which version is currently active
+current_version=$(kubectl get configmap blue-green-config -o jsonpath='{.data.current-version}' 2>/dev/null || echo "blue")
+echo ""
+echo "🎯 Current active version: $current_version"
+
+# Perform health checks and decide on traffic switching
+echo ""
+echo "🏥 Health Check Summary:"
+echo "========================"
+if [ $blue_healthy -eq 0 ]; then
+    echo "✅ Blue deployment is healthy"
+else
+    echo "❌ Blue deployment has issues"
+fi
+
+if [ $green_healthy -eq 0 ]; then
+    echo "✅ Green deployment is healthy"
+else
+    echo "❌ Green deployment has issues"
+fi
+
+# Traffic switching logic
+if [ $green_healthy -eq 0 ] && [ "$current_version" = "blue" ]; then
+    echo ""
+    echo "🔄 Green deployment is healthy. Switching traffic..."
+    switch_traffic "green"
+elif [ $blue_healthy -eq 0 ] && [ "$current_version" = "green" ]; then
+    echo ""
+    echo "🔄 Blue deployment is healthy. Switching traffic..."
+    switch_traffic "blue"
+else
+    echo ""
+    echo "⚠️  Keeping traffic on current version ($current_version) due to health issues"
+fi
+
+# Final status
+echo ""
+echo "🎯 Final Status:"
+echo "================"
+kubectl get services django-messaging-service-blue-green -o wide
+kubectl get configmap blue-green-config -o yaml
+
+echo ""
+echo "✅ Blue-Green deployment process completed!"
+echo ""
+echo "📋 Useful commands:"
+echo "==================="
+echo "• Check deployments: kubectl get deployments -l app=django-messaging-app"
+echo "• Check pods: kubectl get pods -l app=django-messaging-app"
+echo "• Check services: kubectl get services -l app=django-messaging-app"
+echo "• Switch to blue: kubectl patch service django-messaging-service-blue-green -p '{\"spec\":{\"selector\":{\"version\":\"blue\"}}}'"
+echo "• Switch to green: kubectl patch service django-messaging-service-blue-green -p '{\"spec\":{\"selector\":{\"version\":\"green\"}}}'"
+echo "• Test blue directly: kubectl port-forward service/django-messaging-service-blue 8081:80"
+echo "• Test green directly: kubectl port-forward service/django-messaging-service-green 8082:80"
