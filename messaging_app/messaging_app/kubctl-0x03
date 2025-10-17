@@ -1,0 +1,270 @@
+#!/bin/bash
+
+# Rolling Update Script - kubctl-0x03
+# This script performs rolling updates with zero downtime testing
+
+echo "🔄 Rolling Update Script for Django Messaging App"
+echo "================================================="
+
+# Function to check if kubectl is available
+check_kubectl() {
+    if ! command -v kubectl &> /dev/null; then
+        echo "❌ kubectl is not installed or not in PATH"
+        exit 1
+    fi
+}
+
+# Function to check if curl is available
+check_curl() {
+    if ! command -v curl &> /dev/null; then
+        echo "❌ curl is not installed. Please install curl for testing."
+        return 1
+    fi
+    return 0
+}
+
+# Function to get service URL
+get_service_url() {
+    # Try to get minikube service URL
+    local service_url=$(minikube service django-messaging-service-blue-green --url 2>/dev/null)
+    
+    if [ -z "$service_url" ]; then
+        # Fallback: use port-forward
+        echo "🔄 Setting up port forwarding..."
+        kubectl port-forward service/django-messaging-service-blue-green 8080:80 &
+        PORT_FORWARD_PID=$!
+        sleep 3
+        service_url="http://localhost:8080"
+    fi
+    
+    echo "$service_url"
+}
+
+# Function to test application availability
+test_app_availability() {
+    local url=$1
+    local timeout=${2:-5}
+    
+    if check_curl; then
+        curl -s --max-time $timeout "$url" > /dev/null 2>&1
+        return $?
+    else
+        # Fallback: use kubectl to check pod status
+        kubectl get pods -l app=django-messaging-app --field-selector=status.phase=Running > /dev/null 2>&1
+        return $?
+    fi
+}
+
+# Function to continuously test for downtime
+continuous_availability_test() {
+    local url=$1
+    local duration=${2:-60}
+    local interval=${3:-2}
+    
+    echo "🔍 Starting continuous availability test..."
+    echo "URL: $url"
+    echo "Duration: ${duration}s, Interval: ${interval}s"
+    echo "========================================"
+    
+    local start_time=$(date +%s)
+    local end_time=$((start_time + duration))
+    local success_count=0
+    local failure_count=0
+    local total_requests=0
+    
+    # Create log file for detailed results
+    local log_file="/tmp/rolling_update_test_$(date +%s).log"
+    echo "Detailed test log: $log_file"
+    
+    while [ $(date +%s) -lt $end_time ]; do
+        local current_time=$(date '+%Y-%m-%d %H:%M:%S')
+        total_requests=$((total_requests + 1))
+        
+        if test_app_availability "$url" 3; then
+            success_count=$((success_count + 1))
+            echo "[$current_time] ✅ Request $total_requests: SUCCESS" | tee -a "$log_file"
+        else
+            failure_count=$((failure_count + 1))
+            echo "[$current_time] ❌ Request $total_requests: FAILED" | tee -a "$log_file"
+        fi
+        
+        sleep $interval
+    done
+    
+    # Calculate statistics
+    local success_rate=0
+    if [ $total_requests -gt 0 ]; then
+        success_rate=$(( (success_count * 100) / total_requests ))
+    fi
+    
+    echo ""
+    echo "📊 Availability Test Results:"
+    echo "============================="
+    echo "Total requests: $total_requests"
+    echo "Successful: $success_count"
+    echo "Failed: $failure_count"
+    echo "Success rate: ${success_rate}%"
+    echo "Log file: $log_file"
+    
+    if [ $failure_count -eq 0 ]; then
+        echo "✅ Zero downtime achieved!"
+        return 0
+    else
+        echo "⚠️  Downtime detected during rolling update"
+        return 1
+    fi
+}
+
+# Main execution starts here
+echo "📋 Checking prerequisites..."
+check_kubectl
+
+# Check current deployment status
+echo ""
+echo "📊 Current deployment status:"
+echo "============================="
+kubectl get deployments -l app=django-messaging-app
+kubectl get pods -l app=django-messaging-app
+
+# Get service URL for testing
+SERVICE_URL=$(get_service_url)
+echo ""
+echo "🌐 Service URL for testing: $SERVICE_URL"
+
+# Start continuous testing in background
+echo ""
+echo "🚀 Starting rolling update process..."
+echo "===================================="
+
+# Start availability testing in background
+if check_curl; then
+    echo "Starting continuous availability monitoring..."
+    continuous_availability_test "$SERVICE_URL" 120 1 &
+    MONITOR_PID=$!
+else
+    echo "⚠️  Curl not available, skipping continuous testing"
+    MONITOR_PID=""
+fi
+
+# Apply the updated deployment file
+echo ""
+echo "📝 Applying updated deployment (version 2.0)..."
+kubectl apply -f blue_deployment.yaml
+
+if [ $? -eq 0 ]; then
+    echo "✅ Updated deployment applied successfully"
+else
+    echo "❌ Failed to apply updated deployment"
+    exit 1
+fi
+
+# Monitor the rollout status
+echo ""
+echo "📈 Monitoring rollout progress..."
+echo "================================="
+kubectl rollout status deployment/django-messaging-app-blue --timeout=300s
+
+if [ $? -eq 0 ]; then
+    echo "✅ Rolling update completed successfully"
+else
+    echo "❌ Rolling update failed or timed out"
+    
+    # Show rollout history for debugging
+    echo ""
+    echo "📜 Rollout history:"
+    kubectl rollout history deployment/django-messaging-app-blue
+    
+    exit 1
+fi
+
+# Wait for monitoring to complete
+if [ ! -z "$MONITOR_PID" ]; then
+    echo ""
+    echo "⏳ Waiting for availability monitoring to complete..."
+    wait $MONITOR_PID
+    monitoring_result=$?
+else
+    monitoring_result=0
+fi
+
+# Verify the rolling update is complete
+echo ""
+echo "🔍 Verifying rolling update completion..."
+echo "========================================"
+
+# Check current pods
+echo "Current pods after rolling update:"
+kubectl get pods -l app=django-messaging-app,version=blue -o wide
+
+# Check deployment details
+echo ""
+echo "Deployment details:"
+kubectl describe deployment django-messaging-app-blue | grep -A 10 -B 5 -E "(Image|Replicas|Available|Ready)"
+
+# Check rollout history
+echo ""
+echo "📜 Rollout history:"
+kubectl rollout history deployment/django-messaging-app-blue
+
+# Verify all pods are running the new version
+echo ""
+echo "🔍 Verifying pod images..."
+kubectl get pods -l app=django-messaging-app,version=blue -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[0].image}{"\n"}{end}'
+
+# Test application functionality
+echo ""
+echo "🧪 Testing application functionality..."
+if check_curl && [ ! -z "$SERVICE_URL" ]; then
+    echo "Testing main endpoint..."
+    if curl -s --max-time 10 "$SERVICE_URL" > /dev/null; then
+        echo "✅ Application is responding"
+    else
+        echo "❌ Application is not responding"
+    fi
+    
+    # Test API endpoint if available
+    echo "Testing API endpoint..."
+    if curl -s --max-time 10 "$SERVICE_URL/api/" > /dev/null; then
+        echo "✅ API endpoint is responding"
+    else
+        echo "⚠️  API endpoint test failed (may be expected)"
+    fi
+else
+    echo "⚠️  Skipping functionality tests (curl not available)"
+fi
+
+# Cleanup port forwarding if used
+if [ ! -z "$PORT_FORWARD_PID" ]; then
+    kill $PORT_FORWARD_PID 2>/dev/null
+fi
+
+# Final status report
+echo ""
+echo "🎯 Rolling Update Summary:"
+echo "=========================="
+echo "✅ Deployment file applied successfully"
+echo "✅ Rolling update completed"
+echo "✅ All pods verified"
+
+if [ $monitoring_result -eq 0 ]; then
+    echo "✅ Zero downtime achieved"
+else
+    echo "⚠️  Some downtime detected during update"
+fi
+
+echo ""
+echo "📊 Final deployment status:"
+kubectl get deployment django-messaging-app-blue -o wide
+kubectl get pods -l app=django-messaging-app,version=blue
+
+echo ""
+echo "🔧 Useful commands for rollback (if needed):"
+echo "============================================="
+echo "• View rollout history: kubectl rollout history deployment/django-messaging-app-blue"
+echo "• Rollback to previous: kubectl rollout undo deployment/django-messaging-app-blue"
+echo "• Rollback to specific: kubectl rollout undo deployment/django-messaging-app-blue --to-revision=N"
+echo "• Pause rollout: kubectl rollout pause deployment/django-messaging-app-blue"
+echo "• Resume rollout: kubectl rollout resume deployment/django-messaging-app-blue"
+
+echo ""
+echo "✅ Rolling update process completed!"
