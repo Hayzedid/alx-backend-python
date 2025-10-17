@@ -5,11 +5,11 @@ from .models import Message, Notification, MessageHistory
 @admin.register(Message)
 class MessageAdmin(admin.ModelAdmin):
     """Admin interface for Message model"""
-    list_display = ['id', 'sender', 'receiver', 'content_preview', 'timestamp', 'edited', 'read']
-    list_filter = ['timestamp', 'edited', 'read', 'sender', 'receiver']
+    list_display = ['id', 'sender', 'receiver', 'content_preview', 'timestamp', 'edited', 'edited_by', 'read']
+    list_filter = ['timestamp', 'edited', 'read', 'sender', 'receiver', 'edited_by']
     search_fields = ['content', 'sender__username', 'receiver__username']
-    readonly_fields = ['id', 'timestamp']
-    raw_id_fields = ['sender', 'receiver', 'parent_message']
+    readonly_fields = ['id', 'timestamp', 'edited_at']
+    raw_id_fields = ['sender', 'receiver', 'parent_message', 'edited_by']
     
     def content_preview(self, obj):
         """Show a preview of the message content"""
@@ -35,11 +35,11 @@ class NotificationAdmin(admin.ModelAdmin):
 @admin.register(MessageHistory)
 class MessageHistoryAdmin(admin.ModelAdmin):
     """Admin interface for MessageHistory model"""
-    list_display = ['id', 'message', 'old_content_preview', 'edited_at']
-    list_filter = ['edited_at']
-    search_fields = ['old_content', 'message__content']
+    list_display = ['id', 'message', 'old_content_preview', 'edited_by', 'edited_at']
+    list_filter = ['edited_at', 'edited_by']
+    search_fields = ['old_content', 'message__content', 'edited_by__username']
     readonly_fields = ['id', 'edited_at']
-    raw_id_fields = ['message']
+    raw_id_fields = ['message', 'edited_by']
     
     def old_content_preview(self, obj):
         """Show a preview of the old content"""

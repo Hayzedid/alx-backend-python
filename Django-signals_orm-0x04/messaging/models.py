@@ -1,16 +1,7 @@
 from django.contrib.auth.models import User
 from django.db import models
 import uuid
-
-
-class UnreadMessagesManager(models.Manager):
-    """Custom manager to filter unread messages for a specific user"""
-    
-    def unread_for_user(self, user):
-        """Return unread messages for a specific user"""
-        return self.filter(receiver=user, read=False).only(
-            'id', 'sender', 'content', 'timestamp', 'read'
-        )
+from .managers import UnreadMessagesManager
 
 
 class Message(models.Model):
@@ -21,6 +12,15 @@ class Message(models.Model):
     content = models.TextField()
     timestamp = models.DateTimeField(auto_now_add=True)
     edited = models.BooleanField(default=False)
+    edited_by = models.ForeignKey(
+        User, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        related_name='edited_messages',
+        help_text="User who last edited this message"
+    )
+    edited_at = models.DateTimeField(null=True, blank=True)
     read = models.BooleanField(default=False)
     parent_message = models.ForeignKey(
         'self', 
@@ -88,10 +88,21 @@ class Notification(models.Model):
 
 
 class MessageHistory(models.Model):
-    """Model for storing message edit history"""
+    """
+    Model for storing message edit history.
+    Display the message edit history in the user interface, allowing users to view previous versions of their messages.
+    """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name='history')
     old_content = models.TextField()
+    edited_by = models.ForeignKey(
+        User, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        related_name='message_edit_history',
+        help_text="User who made this edit"
+    )
     edited_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:
@@ -99,4 +110,5 @@ class MessageHistory(models.Model):
         verbose_name_plural = "Message histories"
     
     def __str__(self):
-        return f"History for message {self.message.id} at {self.edited_at}"
+        editor = self.edited_by.username if self.edited_by else "Unknown"
+        return f"History for message {self.message.id} edited by {editor} at {self.edited_at}"

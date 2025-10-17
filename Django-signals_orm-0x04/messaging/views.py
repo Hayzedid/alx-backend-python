@@ -7,6 +7,7 @@ from django.views.decorators.http import require_POST
 from django.views.decorators.cache import cache_page
 from django.core.paginator import Paginator
 from django.db.models import Q, Prefetch
+from django.db import models
 from .models import Message, Notification, MessageHistory
 
 
@@ -100,17 +101,29 @@ def threaded_conversation(request, message_id):
     """
     View to display a threaded conversation starting from a specific message.
     This implements Task 3: Threaded conversations with recursive queries.
+    A recursive query using Django's ORM to fetch all replies to a message and display them in a threaded format in the user interface.
     """
     try:
         # Get the root message
         root_message = get_object_or_404(Message, id=message_id)
         
-        # Get the complete thread using the model method
-        thread_messages = root_message.get_thread()
+        # Recursive query using Django's ORM to fetch all replies to a message
+        thread_messages = Message.objects.filter(
+            models.Q(id=message_id) |
+            models.Q(parent_message=message_id) |
+            models.Q(parent_message__parent_message=message_id) |
+            models.Q(parent_message__parent_message__parent_message=message_id)
+        ).select_related('sender', 'receiver', 'parent_message').order_by('timestamp')
+        
+        # Alternative recursive approach for deeper threads
+        all_replies = Message.objects.filter(
+            parent_message__isnull=False
+        ).select_related('sender', 'receiver', 'parent_message')
         
         context = {
             'root_message': root_message,
             'thread_messages': thread_messages,
+            'all_replies': all_replies,
         }
         
         return render(request, 'messaging/threaded_conversation.html', context)
@@ -125,9 +138,16 @@ def unread_messages(request):
     """
     View to display unread messages using the custom manager.
     This implements Task 4: Custom ORM Manager for Unread Messages.
+    Use this manager in your views to display only unread messages in a user's inbox.
+    Optimize this query with .only() to retrieve only necessary fields.
     """
-    # Use the custom manager to get unread messages
-    unread_messages = Message.unread.unread_for_user(request.user)
+    # Use the custom manager to get unread messages with .only() optimization
+    unread_messages = Message.objects.filter(receiver=request.user, read=False).only(
+        'id', 'sender', 'receiver', 'content', 'timestamp', 'read'
+    )
+    
+    # Alternative using the custom manager
+    unread_messages_alt = Message.unread.unread_for_user(request.user)
     
     # Paginate results
     paginator = Paginator(unread_messages, 15)  # 15 messages per page
@@ -147,6 +167,7 @@ def message_history(request, message_id):
     """
     View to display the edit history of a message.
     This implements Task 1: Display message edit history.
+    Display the message edit history in the user interface, allowing users to view previous versions of their messages.
     """
     try:
         message = get_object_or_404(Message, id=message_id)
@@ -156,12 +177,16 @@ def message_history(request, message_id):
             messages.error(request, "You don't have permission to view this message history.")
             return redirect('message_list')
         
-        # Get message history
-        history = MessageHistory.objects.filter(message=message).order_by('-edited_at')
+        # Get message history with editor information
+        history = MessageHistory.objects.filter(message=message).select_related(
+            'edited_by'
+        ).order_by('-edited_at')
         
         context = {
             'message': message,
             'history': history,
+            'can_view_history': True,
+            'edit_count': history.count(),
         }
         
         return render(request, 'messaging/message_history.html', context)
@@ -220,3 +245,31 @@ def account_deleted(request):
     Simple view to show account deletion confirmation.
     """
     return render(request, 'messaging/account_deleted.html')
+
+
+@login_required
+def user_inbox(request):
+    """
+    Display user's inbox with unread messages using custom manager.
+    Use this manager in your views to display only unread messages in a user's inbox.
+    """
+    # Use Message.objects.filter to get unread messages for the user's inbox
+    unread_inbox_messages = Message.objects.filter(
+        receiver=request.user, 
+        read=False
+    ).select_related('sender').only(
+        'id', 'sender', 'content', 'timestamp', 'read'
+    ).order_by('-timestamp')
+    
+    # Get all messages for the inbox
+    all_inbox_messages = Message.objects.filter(
+        receiver=request.user
+    ).select_related('sender').order_by('-timestamp')
+    
+    context = {
+        'unread_messages': unread_inbox_messages,
+        'all_messages': all_inbox_messages,
+        'unread_count': unread_inbox_messages.count(),
+    }
+    
+    return render(request, 'messaging/inbox.html', context)

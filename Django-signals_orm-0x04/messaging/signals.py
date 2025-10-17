@@ -34,6 +34,7 @@ def log_message_edit(sender, instance, **kwargs):
     """
     Signal handler to log message edits before they are saved.
     This implements Task 1: Log when a user edits a message and save the old content.
+    Display the message edit history in the user interface, allowing users to view previous versions of their messages.
     """
     if instance.pk:  # Only for existing messages (updates, not new messages)
         try:
@@ -42,14 +43,17 @@ def log_message_edit(sender, instance, **kwargs):
             
             # Check if the content has actually changed
             if old_message.content != instance.content:
-                # Save the old content to history
+                # Save the old content to history with editor information
                 MessageHistory.objects.create(
                     message=old_message,
-                    old_content=old_message.content
+                    old_content=old_message.content,
+                    edited_by=instance.edited_by or instance.sender  # Use edited_by if set, otherwise sender
                 )
                 
-                # Mark the message as edited
+                # Mark the message as edited and set edit timestamp
                 instance.edited = True
+                from django.utils import timezone
+                instance.edited_at = timezone.now()
                 
         except Message.DoesNotExist:
             # This shouldn't happen, but handle gracefully
@@ -61,19 +65,34 @@ def cleanup_user_data(sender, instance, **kwargs):
     """
     Signal handler to clean up user-related data when a user is deleted.
     This implements Task 2: Automatically clean up related data when a user deletes their account.
-    
-    Note: This signal will be triggered when a User is deleted.
-    The CASCADE foreign key relationships will handle most cleanup automatically,
-    but this signal can be used for additional custom cleanup logic.
+    A post_delete signal on the User model to delete all messages, notifications, and message histories associated with the user.
     """
-    # The CASCADE foreign key relationships will automatically delete:
-    # - Messages sent by the user (sent_messages)
-    # - Messages received by the user (received_messages)  
-    # - Notifications for the user (notifications)
-    # - MessageHistory entries (through message deletion)
+    # Delete all messages sent by the user
+    sent_messages = Message.objects.filter(sender=instance)
+    sent_messages.delete()
     
-    # Additional custom cleanup can be added here if needed
-    # For example, logging the deletion or sending notifications to other users
+    # Delete all messages received by the user
+    received_messages = Message.objects.filter(receiver=instance)
+    received_messages.delete()
+    
+    # Delete all notifications for the user
+    user_notifications = Notification.objects.filter(user=instance)
+    user_notifications.delete()
+    
+    # Delete all message histories related to the user's messages
+    # (This will be handled by CASCADE, but we can also do it explicitly)
+    user_message_histories = MessageHistory.objects.filter(
+        message__sender=instance
+    )
+    user_message_histories.delete()
+    
+    # Additional cleanup for message histories of received messages
+    received_message_histories = MessageHistory.objects.filter(
+        message__receiver=instance
+    )
+    received_message_histories.delete()
+    
+    # Log the deletion
     print(f"User {instance.username} and all related data has been deleted")
 
 

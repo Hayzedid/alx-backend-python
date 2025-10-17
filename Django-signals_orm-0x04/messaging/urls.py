@@ -9,6 +9,7 @@ urlpatterns = [
     path('conversation/<int:conversation_id>/', views.message_list, name='conversation_detail'),
     path('thread/<uuid:message_id>/', views.threaded_conversation, name='threaded_conversation'),
     path('unread/', views.unread_messages, name='unread_messages'),
+    path('inbox/', views.user_inbox, name='user_inbox'),
     path('history/<uuid:message_id>/', views.message_history, name='message_history'),
     
     # Notification views
