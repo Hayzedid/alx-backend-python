@@ -7,10 +7,11 @@ services:
     container_name: messaging_app_db
     restart: unless-stopped
     environment:
-      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_DB: ${MYSQL_DB}
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DB}
     ports:
       - "3306:3306"
     volumes:
@@ -33,7 +34,7 @@ services:
       - DEBUG=${DEBUG}
       - SECRET_KEY=${SECRET_KEY}
       - DB_ENGINE=django.db.backends.mysql
-      - DB_NAME=${MYSQL_DATABASE}
+      - DB_NAME=${MYSQL_DB}
       - DB_USER=${MYSQL_USER}
       - DB_PASSWORD=${MYSQL_PASSWORD}
       - DB_HOST=db
@@ -50,7 +51,7 @@ services:
     command: >
       sh -c "python manage.py migrate &&
              python manage.py collectstatic --noinput &&
-             gunicorn --bind 0.0.0.0:8000 messaging_app.wsgi:application"
+             python3 manage.py runserver 0.0.0.0:8000"
 
 # Named Volumes
 volumes:
