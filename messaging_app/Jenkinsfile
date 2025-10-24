@@ -1,0 +1,72 @@
+pipeline {
+    agent any
+    
+    environment {
+        DOCKERHUB_CREDENTIALS = credentials('docker-hub-credentials')
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                git branch: 'main',
+                url: 'https://github.com/yourusername/alx-backend-python.git',
+                credentialsId: 'github-credentials'
+                
+                // Clean workspace
+                cleanWs()
+            }
+        }
+        
+        stage('Set up Python') {
+            steps {
+                withPythonEnv('python3.9') {
+                    sh 'python --version'
+                    sh 'pip install -r requirements.txt'
+                }
+            }
+        }
+        
+        stage('Run Tests') {
+            steps {
+                withPythonEnv('python3.9') {
+                    sh '''
+                    python manage.py test --noinput
+                    '''
+                }
+            }
+            post {
+                always {
+                    junit '**/test-reports/*.xml'
+                }
+            }
+        }
+        
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    docker.build("yourusername/messaging-app:${env.BUILD_NUMBER}")
+                }
+            }
+        }
+        
+        stage('Push to Docker Hub') {
+            steps {
+                script {
+                    docker.withRegistry('https://registry.hub.docker.com', 'docker-hub-credentials') {
+                        docker.image("yourusername/messaging-app:${env.BUILD_NUMBER}").push()
+                        docker.image("yourusername/messaging-app:latest").push()
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed!'
+        }
+    }
+}
